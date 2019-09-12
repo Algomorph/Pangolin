@@ -7,6 +7,7 @@
 #include <ImfChannelList.h>
 #include <ImfInputFile.h>
 #include <ImfOutputFile.h>
+#include <ImfIO.h>
 #endif // HAVE_OPENEXR
 
 namespace pangolin {
@@ -30,7 +31,107 @@ void SetOpenEXRChannels(Imf::ChannelList& ch, const pangolin::PixelFormat& fmt)
         ch.insert( CHANNEL_NAMES[c], Imf::Channel(OpenEXRPixelType(fmt.channel_bits[c])) );
     }
 }
+
+class StdIStream: public Imf::IStream
+{
+  public:
+    StdIStream (std::istream &is):
+        Imf::IStream ("stream"),
+        _is (&is)
+    {
+    }
+
+    virtual bool read (char c[/*n*/], int n)
+    {
+        if (!*_is)
+            throw std::runtime_error("Unexpected end of file.");
+        _is->read (c, n);
+        if (_is->gcount() < n)
+        {
+            throw std::runtime_error("Early end of file");
+            return false;
+        }
+        return true;
+    }
+
+    virtual Imf::Int64 tellg ()
+    {
+        return std::streamoff (_is->tellg());
+    }
+
+    virtual void seekg (Imf::Int64 pos)
+    {
+        _is->seekg (pos);
+    }
+
+    virtual void clear ()
+    {
+        _is->clear();
+    }
+
+  private:
+    std::istream *	_is;
+};
+
+PixelFormat GetPixelFormat(const Imf::Header& header)
+{
+    const Imf::ChannelList &channels = header.channels();
+    size_t count = 0;
+    for (Imf::ChannelList::ConstIterator i = channels.begin(); i != channels.end(); ++i){
+        const Imf::Channel& channel = i.channel();
+        if (channel.type != Imf::FLOAT){
+            throw std::invalid_argument("Currently, only 32-bit float OpenEXR files are supported.");
+        }
+        count += 1;
+    }
+
+    switch (count) {
+        case 1: return PixelFormatFromString("GRAY32F");
+        case 3: return PixelFormatFromString("RGB96F");
+        case 4: return PixelFormatFromString("RGBA128F");
+        default: throw std::invalid_argument("Currently, only 1, 3 or 4-channel OpenEXR files are supported.");
+    }
+}
+
 #endif //HAVE_OPENEXR
+
+TypedImage LoadExr(std::istream& source)
+{
+#ifdef HAVE_OPENEXR
+    StdIStream istream(source);
+    Imf::InputFile file(istream);
+    PANGO_ENSURE(file.isComplete());
+
+    Imath::Box2i dw = file.header().dataWindow();
+    int width = dw.max.x - dw.min.x + 1;
+    int height = dw.max.y - dw.min.y + 1;
+
+    PixelFormat format = GetPixelFormat(file.header());
+    TypedImage img(width, height, format);
+
+    char *imgBase = (char *) img.ptr - (dw.min.x + dw.min.y * width) * sizeof(float) * format.channels;
+    Imf::FrameBuffer fb;
+
+    const Imf::ChannelList &channels = file.header().channels();
+    size_t c = 0;
+    for (Imf::ChannelList::ConstIterator i = channels.begin(); i != channels.end(); ++i){
+        fb.insert(i.name(), Imf::Slice(
+                        Imf::FLOAT, imgBase + sizeof(float) * c++,
+                        sizeof(float) * format.channels,
+                        sizeof(float) * format.channels * size_t(width),
+                        1, 1,
+                        0.0));
+    }
+
+    file.setFrameBuffer(fb);
+    file.readPixels(dw.min.y, dw.max.y);
+
+    return img;
+#else
+    PANGOLIN_UNUSED(source);
+    throw std::runtime_error("Rebuild Pangolin for EXR support.");
+#endif //HAVE_OPENEXR
+}
 
 void SaveExr(const Image<unsigned char>& image_in, const pangolin::PixelFormat& fmt, const std::string& filename, bool top_line_first)
 {

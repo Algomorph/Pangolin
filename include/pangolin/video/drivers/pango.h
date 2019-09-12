@@ -39,7 +39,7 @@ class PANGOLIN_EXPORT PangoVideo
     : public VideoInterface, public VideoPropertiesInterface, public VideoPlaybackInterface
 {
 public:
-    PangoVideo(const std::string& filename);
+    PangoVideo(const std::string& filename, std::shared_ptr<PlaybackSession> playback_session);
     ~PangoVideo();
 
     // Implement VideoInterface
@@ -74,6 +74,8 @@ public:
 
     size_t Seek(size_t frameid) override;
 
+    std::string GetSourceUri();
+
 private:
     void HandlePipeClosed();
 
@@ -82,7 +84,7 @@ protected:
     void SetupStreams(const PacketStreamSource& src);
 
     const std::string _filename;
-    PlaybackSession& _playback_session;
+    std::shared_ptr<PlaybackSession> _playback_session;
     std::shared_ptr<PacketStreamReader> _reader;
     SyncTimeEventPromise _event_promise;
     int _src_id;
@@ -94,6 +96,7 @@ protected:
     std::vector<ImageDecoderFunc> stream_decoder;
     picojson::value _device_properties;
     picojson::value _frame_properties;
+    std::string _source_uri;
 
     Registration<size_t> session_seek;
 };

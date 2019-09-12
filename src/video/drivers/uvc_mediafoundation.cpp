@@ -66,6 +66,7 @@ UvcMediaFoundationVideo::~UvcMediaFoundationVideo()
 
 void UvcMediaFoundationVideo::Start()
 {
+
 }
 
 void UvcMediaFoundationVideo::Stop()
@@ -169,7 +170,7 @@ int UvcMediaFoundationVideo::IoCtrl(uint8_t unit, uint8_t ctrl, unsigned char* d
     }
 
     HRESULT hr;
-    KSP_NODE s;
+    KSP_NODE s = {};
     ULONG ulBytesReturned;
 
     s.Property.Set = GUID_EXTENSION_UNIT_DESCRIPTOR_OV580;
@@ -194,6 +195,31 @@ int UvcMediaFoundationVideo::IoCtrl(uint8_t unit, uint8_t ctrl, unsigned char* d
 
     return 0;
 }
+
+bool UvcMediaFoundationVideo::GetExposure(int& exp_us)
+{
+    pango_print_warn("GetExposure not implemented for UvcMediaFoundationVideo");
+    return false;
+}
+
+bool UvcMediaFoundationVideo::SetExposure(int exp_us)
+{
+    pango_print_warn("SetExposure not implemented for UvcMediaFoundationVideo");
+    return false;
+}
+
+bool UvcMediaFoundationVideo::GetGain(float& gain)
+{
+    pango_print_warn("GetGain not implemented for UvcMediaFoundationVideo");
+    return false;
+}
+
+bool UvcMediaFoundationVideo::SetGain(float gain)
+{
+    pango_print_warn("SetGain not implemented for UvcMediaFoundationVideo");
+    return false;
+}
+
 
 const picojson::value& UvcMediaFoundationVideo::DeviceProperties() const
 {
@@ -285,13 +311,16 @@ bool UvcMediaFoundationVideo::FindDevice(int vendorId, int productId, int device
     for(UINT32 i = 0; i < deviceCount; ++i)
     {
         devices[i]->Release();
+        devices[i] = nullptr;
     }
+    devices = nullptr;
 
     CoTaskMemFree(devices);
 
     if(searchAttributes != nullptr)
     {
         searchAttributes->Release();
+        searchAttributes = nullptr;
     }
 
     // Find the DirectShow device
@@ -317,6 +346,7 @@ bool UvcMediaFoundationVideo::FindDevice(int vendorId, int productId, int device
             if(FAILED(hr))
             {
                 moniker->Release();
+                moniker = nullptr;
                 continue;
             }
 
@@ -568,6 +598,7 @@ void UvcMediaFoundationVideo::DeinitDevice()
     if(mediaSource)
     {
         mediaSource->Shutdown();
+        mediaSource->Release();
         mediaSource = nullptr;
     }
 
@@ -609,7 +640,7 @@ bool UvcMediaFoundationVideo::SymLinkIDMatches(const std::wstring& symLink, cons
 
 PANGOLIN_REGISTER_FACTORY(UvcMediaFoundationVideo)
 {
-    struct UvcVideoFactory : public FactoryInterface<VideoInterface>
+    struct UvcVideoFactory final : public FactoryInterface<VideoInterface>
     {
         std::unique_ptr<VideoInterface> Open(const Uri& uri) override
         {

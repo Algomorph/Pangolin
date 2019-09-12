@@ -2,12 +2,9 @@
 
 #include <pangolin/display/image_view.h>
 #include <pangolin/gl/glpixformat.h>
-#include <pangolin/gl/gltexturecache.h>
-#include <pangolin/handler/handler_image.h>
 #include <pangolin/pangolin.h>
 #include <pangolin/utils/file_utils.h>
 #include <pangolin/utils/sigstate.h>
-#include <pangolin/utils/timer.h>
 #include <pangolin/video/video_input.h>
 
 
@@ -35,6 +32,7 @@ VideoViewer::VideoViewer(const std::string& window_name, const std::string& inpu
 {
     pangolin::Var<int>::Attach("ui.frame", current_frame);
     pangolin::Var<int>::Attach("ui.record_nth_frame", record_nth_frame);
+    pangolin::Var<int>::Attach("ui.draw_nth_frame", draw_nth_frame);
 
 
     if(!input_uri.empty()) {
@@ -147,7 +145,7 @@ void VideoViewer::Run()
                         images[v], video.Streams()[v].PixFormat(),
                         pangolin::MakeUniqueFilename("capture.png")
                     );
-                }catch(std::exception e){
+                }catch(const std::exception& e){
                     pango_print_error("Unable to save frame: %s\n", e.what());
                 }
             }
@@ -181,9 +179,10 @@ void VideoViewer::Run()
 
                 // Update images
                 if((frame-1) % draw_nth_frame == 0) {
-                    for(unsigned int i=0; i<images.size(); ++i) {
-                        stream_views[i].SetImage(images[i], pangolin::GlPixFormat(video.Streams()[i].PixFormat() ));
-                    }
+                    for(unsigned int i=0; i<images.size(); ++i) 
+                        if(stream_views[i].IsShown()) {
+                            stream_views[i].SetImage(images[i], pangolin::GlPixFormat(video.Streams()[i].PixFormat() ));
+                        }
                 }
             }
         }
@@ -328,6 +327,16 @@ void VideoViewer::SetDiscardBufferedFrames(bool new_state)
 
 void VideoViewer::DrawEveryNFrames(int n)
 {
+    if(n <= 0) {
+        pango_print_warn("Cannot draw every %d frames. Ignoring request.\n",n);
+        return;
+    }
+
+    if(n != draw_nth_frame && n == 1)
+        pango_print_info("Drawing every frame.\n");
+    if(n != draw_nth_frame && n > 1)
+        pango_print_info("Drawing one in every %d frames.\n",n);
+
     draw_nth_frame=n;
 }
 
@@ -349,8 +358,11 @@ void VideoViewer::Skip(int frames)
     std::lock_guard<std::mutex> lock(control_mutex);
 
     if(video_playback) {
-        current_frame = video_playback->Seek(current_frame + frames) -1;
-        grab_until = current_frame + 1;
+        const int next_frame = current_frame + frames;
+        if (next_frame >= 0) {
+            current_frame = video_playback->Seek(next_frame) -1;
+            grab_until = current_frame + 1;
+        } 
     }else{
         if(frames >= 0) {
             grab_until = current_frame + frames;
@@ -361,26 +373,36 @@ void VideoViewer::Skip(int frames)
 
 }
 
-void VideoViewer::ChangeExposure(int delta_us)
+bool VideoViewer::ChangeExposure(int delta_us)
 {
     std::lock_guard<std::mutex> lock(control_mutex);
 
     std::vector<pangolin::GenicamVideoInterface*> ifs = FindMatchingVideoInterfaces<pangolin::GenicamVideoInterface>(video);
+    std::string exposure_time;
+    if (ifs[active_cam]->GetParameter("ExposureTime",exposure_time))
+    {
+            return false;
+    }
 
-    int exp = atoi(ifs[active_cam]->GetParameter("ExposureTime").c_str());
+    int exp = atoi(exposure_time.c_str());
 
-    ifs[active_cam]->SetParameter("ExposureTime", std::to_string(exp+delta_us));
+    return ifs[active_cam]->SetParameter("ExposureTime", std::to_string(exp+delta_us));
 }
 
-void VideoViewer::ChangeGain(float delta)
+bool VideoViewer::ChangeGain(float delta)
 {
     std::lock_guard<std::mutex> lock(control_mutex);
 
     std::vector<pangolin::GenicamVideoInterface*> ifs = FindMatchingVideoInterfaces<pangolin::GenicamVideoInterface>(video);
 
-    double gain = atoi(ifs[active_cam]->GetParameter("Gain").c_str());
+    std::string gain_string;
+    if (!ifs[active_cam]->GetParameter("Gain", gain_string))
+    {
+        return false;
+    }
+    double gain = atoi(gain_string.c_str());
 
-    ifs[active_cam]->SetParameter("Gain", std::to_string(gain+delta));
+    return ifs[active_cam]->SetParameter("Gain", std::to_string(gain+delta));
 }
 
 
